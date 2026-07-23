@@ -248,8 +248,16 @@ function render() {
   // Stat tiles
   const latest = data[0]?.submitted_at;
   const versions = [...new Set(data.map(r => r.question_set_version))].sort().join(', ') || '—';
+  // Unique submitters = distinct anonymous device ids. Rows from before the
+  // device-id release have none; count those together as "unknown" so the
+  // number never overstates uniqueness.
+  const withId = data.filter(r => r.device_id);
+  const uniqueDevices = new Set(withId.map(r => r.device_id)).size;
+  const noIdCount = data.length - withId.length;
+  const uniqueNote = noIdCount ? `+${noIdCount} pre-ID` : (data.length > uniqueDevices ? 'some repeat' : 'all distinct');
   $('tiles').innerHTML = `
     <div class="tile"><div class="k">Responses</div><div class="v">${data.length}</div></div>
+    <div class="tile"><div class="k">Unique submitters</div><div class="v">${uniqueDevices}</div><div class="n">${uniqueNote}</div></div>
     <div class="tile"><div class="k">Latest</div><div class="v" style="font-size:16px">${latest ? new Date(latest).toLocaleDateString() : '—'}</div>
       <div class="n">${latest ? new Date(latest).toLocaleTimeString() : ''}</div></div>
     <div class="tile"><div class="k">Survey version</div><div class="v">${versions}</div></div>`;
