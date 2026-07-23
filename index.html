@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MGBfC App Feedback</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:        #f9f9f7;
+    --surface-1:   #fcfcfb;
+    --text-primary:#0b0b0b;
+    --text-secondary:#52514e;
+    --muted:       #898781;
+    --grid:        #e1e0d9;
+    --baseline:    #c3c2b7;
+    --border:      rgba(11,11,11,0.10);
+    --series-1:    #2a78d6;
+    --series-1-soft:#9ec5f4;
+    --critical:    #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page:        #0d0d0d;
+      --surface-1:   #1a1a19;
+      --text-primary:#ffffff;
+      --text-secondary:#c3c2b7;
+      --muted:       #898781;
+      --grid:        #2c2c2a;
+      --baseline:    #383835;
+      --border:      rgba(255,255,255,0.10);
+      --series-1:    #3987e5;
+      --series-1-soft:#1c5cab;
+      --critical:    #e66767;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--page);
+    color: var(--text-primary);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 24px 16px 64px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 650; }
+  .sub { color: var(--text-secondary); font-size: 13px; margin-top: 2px; }
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 16px;
+  }
+  /* ── Login ── */
+  #login { max-width: 360px; margin: 10vh auto 0; }
+  #login h1 { margin-bottom: 4px; }
+  #login label { display:block; font-size: 12px; color: var(--text-secondary); margin: 14px 0 4px; }
+  #login input {
+    width: 100%; padding: 10px 12px; font: inherit;
+    border: 1px solid var(--baseline); border-radius: 8px;
+    background: var(--page); color: var(--text-primary);
+  }
+  #login button {
+    width: 100%; margin-top: 18px; padding: 10px;
+    font: inherit; font-weight: 600;
+    background: var(--series-1); color: #fff;
+    border: 0; border-radius: 8px; cursor: pointer;
+  }
+  #login .err { color: var(--critical); font-size: 13px; margin-top: 10px; min-height: 1.2em; }
+  /* ── Toolbar ── */
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 20px; }
+  .toolbar select {
+    font: inherit; font-size: 13px; padding: 6px 10px;
+    border: 1px solid var(--baseline); border-radius: 8px;
+    background: var(--surface-1); color: var(--text-primary);
+  }
+  .toolbar .spacer { flex: 1; }
+  .toolbar button {
+    font: inherit; font-size: 13px; padding: 6px 12px;
+    background: none; border: 1px solid var(--baseline); border-radius: 8px;
+    color: var(--text-secondary); cursor: pointer;
+  }
+  /* ── Stat tiles ── */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 16px; }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 16px;
+  }
+  .tile .k { font-size: 12px; color: var(--text-secondary); }
+  .tile .v { font-size: 26px; font-weight: 650; margin-top: 2px; }
+  .tile .n { font-size: 12px; color: var(--muted); }
+  /* ── Charts ── */
+  h2 { font-size: 14px; font-weight: 650; }
+  .qrow { margin-top: 14px; }
+  .qrow .lbl { font-size: 13px; }
+  .qrow .meta { color: var(--muted); font-size: 12px; }
+  .barTrack {
+    height: 14px; margin-top: 4px; border-radius: 4px;
+    background: var(--page); border: 1px solid var(--grid);
+    position: relative; overflow: hidden;
+  }
+  .barFill {
+    position: absolute; inset: 0 auto 0 0;
+    background: var(--series-1); border-radius: 3px;
+  }
+  .axis5 { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 6px; }
+  svg text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+  /* ── Table ── */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  th { text-align: left; color: var(--text-secondary); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--baseline); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); text-align: center; padding: 28px 0; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div id="login" class="card">
+  <h1>App Feedback</h1>
+  <p class="sub">MGBfC caregiver feedback — team sign-in</p>
+  <label for="email">Email</label>
+  <input id="email" type="email" autocomplete="username" placeholder="team email">
+  <label for="pw">Password</label>
+  <input id="pw" type="password" autocomplete="current-password">
+  <button id="signin">Sign in</button>
+  <p class="err" id="loginErr"></p>
+</div>
+
+<div id="app" class="wrap hidden">
+  <h1>App Feedback</h1>
+  <p class="sub">Anonymous Likert ratings from the caregiver app. Free-text feedback arrives by email, not here.</p>
+
+  <div class="toolbar">
+    <select id="envFilter" aria-label="Environment">
+      <option value="production" selected>Production</option>
+      <option value="dev">Dev / test</option>
+      <option value="">All environments</option>
+    </select>
+    <select id="unitFilter" aria-label="Unit"><option value="">All units</option></select>
+    <span class="spacer"></span>
+    <button id="refresh">Refresh</button>
+    <button id="signout">Sign out</button>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="card">
+    <h2>Average rating per question <span class="meta" id="qMeta"></span></h2>
+    <div id="qBars"></div>
+  </div>
+
+  <div class="card">
+    <h2>Responses over time</h2>
+    <div id="timeChart" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <h2>Recent responses</h2>
+    <div style="overflow-x:auto"><table id="recent"></table></div>
+  </div>
+</div>
+
+<script>
+/* Configuration — all public-by-design values. Security lives in Supabase
+   row-level security: the anon key can only INSERT; reading requires the
+   signed-in team account (SELECT is granted to authenticated only). */
+const SUPABASE_URL = 'https://qaqqpnjerjjyuygjqwpf.supabase.co';
+const ANON_KEY = 'sb_publishable_vv6cd3z8vRDlmNQPHkBtrA_NfAdmCzo';
+/* Question labels come from the same file the app shows, so the dashboard
+   stays in sync with the published survey automatically. */
+const QUESTIONS_URL = 'https://raw.githubusercontent.com/MGH-LCS/patient-family-resource-content/testflight-mgh-picu-mirror/assets/content/feedback_questions.json';
+
+const $ = (id) => document.getElementById(id);
+let rows = [];            // all fetched responses
+let labels = {};          // question id -> English label
+let questionOrder = [];   // display order from the published survey
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+function token() { return sessionStorage.getItem('fb_token'); }
+
+async function signIn() {
+  $('loginErr').textContent = '';
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: { apikey: ANON_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: $('email').value.trim(), password: $('pw').value }),
+  }).catch(() => null);
+  const data = res ? await res.json().catch(() => ({})) : {};
+  if (!res || !res.ok || !data.access_token) {
+    $('loginErr').textContent = data.msg || data.error_description || 'Sign-in failed — check the password.';
+    return;
+  }
+  sessionStorage.setItem('fb_token', data.access_token);
+  enterApp();
+}
+
+function signOut() {
+  sessionStorage.removeItem('fb_token');
+  $('app').classList.add('hidden');
+  $('login').classList.remove('hidden');
+}
+
+// ── Data ─────────────────────────────────────────────────────────────────────
+
+async function loadLabels() {
+  try {
+    const res = await fetch(QUESTIONS_URL, { cache: 'no-store' });
+    const file = await res.json();
+    questionOrder = file.questions.filter(q => q.type === 'likert').map(q => q.id);
+    for (const q of file.questions) labels[q.id] = q.label?.en || q.id;
+  } catch { /* fall back to raw ids */ }
+}
+
+async function loadRows() {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/feedback_responses?select=*&order=submitted_at.desc&limit=2000`,
+    { headers: { apikey: ANON_KEY, Authorization: `Bearer ${token()}` } },
+  );
+  if (res.status === 401) { signOut(); return; }
+  rows = await res.json();
+  const units = [...new Set(rows.map(r => r.unit_id).filter(Boolean))].sort();
+  $('unitFilter').innerHTML = '<option value="">All units</option>' +
+    units.map(u => `<option value="${u}">${u.toUpperCase()}</option>`).join('');
+  render();
+}
+
+function filtered() {
+  const env = $('envFilter').value;
+  const unit = $('unitFilter').value;
+  return rows.filter(r =>
+    (!env || (r.environment || 'production') === env) &&
+    (!unit || r.unit_id === unit));
+}
+
+// ── Rendering ────────────────────────────────────────────────────────────────
+
+function render() {
+  const data = filtered();
+
+  // Stat tiles
+  const latest = data[0]?.submitted_at;
+  const versions = [...new Set(data.map(r => r.question_set_version))].sort().join(', ') || '—';
+  $('tiles').innerHTML = `
+    <div class="tile"><div class="k">Responses</div><div class="v">${data.length}</div></div>
+    <div class="tile"><div class="k">Latest</div><div class="v" style="font-size:16px">${latest ? new Date(latest).toLocaleDateString() : '—'}</div>
+      <div class="n">${latest ? new Date(latest).toLocaleTimeString() : ''}</div></div>
+    <div class="tile"><div class="k">Survey version</div><div class="v">${versions}</div></div>`;
+
+  renderQuestionBars(data);
+  renderTimeChart(data);
+  renderTable(data);
+}
+
+function renderQuestionBars(data) {
+  const byQ = {};
+  for (const r of data) {
+    for (const [qid, v] of Object.entries(r.answers || {})) {
+      if (typeof v !== 'number') continue;
+      (byQ[qid] ??= []).push(v);
+    }
+  }
+  const ids = [...new Set([...questionOrder, ...Object.keys(byQ)])].filter(id => byQ[id]);
+  $('qMeta').textContent = data.length ? '' : '';
+  if (!ids.length) { $('qBars').innerHTML = '<p class="empty">No responses match the current filters.</p>'; return; }
+
+  $('qBars').innerHTML = ids.map(id => {
+    const vals = byQ[id];
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const pct = ((avg - 1) / 4) * 100; // 1–5 scale → 0–100% of track
+    return `
+      <div class="qrow">
+        <div class="lbl">${labels[id] || id} <span class="meta">— avg ${avg.toFixed(2)} · n=${vals.length}</span></div>
+        <div class="barTrack"><div class="barFill" style="width:${pct}%"></div></div>
+      </div>`;
+  }).join('') + `
+    <div class="axis5"><span>1 · Strongly disagree</span><span>3</span><span>5 · Strongly agree</span></div>`;
+}
+
+function renderTimeChart(data) {
+  if (!data.length) { $('timeChart').innerHTML = '<p class="empty">No responses match the current filters.</p>'; return; }
+  const byDay = {};
+  for (const r of data) {
+    const d = (r.submitted_at || '').slice(0, 10);
+    byDay[d] = (byDay[d] || 0) + 1;
+  }
+  const days = Object.keys(byDay).sort();
+  // Fill the span from first response to today so gaps read as gaps.
+  const span = [];
+  for (let d = new Date(days[0] + 'T00:00:00Z'); d <= new Date(); d.setUTCDate(d.getUTCDate() + 1)) {
+    span.push(d.toISOString().slice(0, 10));
+  }
+  const shown = span.slice(-60); // last 60 days max
+  const max = Math.max(...shown.map(d => byDay[d] || 0), 1);
+  const W = 840, H = 120, pad = 4;
+  const bw = Math.max(2, Math.floor(W / shown.length) - 2);
+  const bars = shown.map((d, i) => {
+    const c = byDay[d] || 0;
+    const h = c === 0 ? 0 : Math.max(3, Math.round((c / max) * (H - 30)));
+    const x = Math.round(i * (W / shown.length)) + pad;
+    return `<rect x="${x}" y="${H - 20 - h}" width="${bw}" height="${h}" rx="2"
+      fill="var(--series-1)"><title>${d}: ${c} response${c === 1 ? '' : 's'}</title></rect>`;
+  }).join('');
+  const firstLbl = shown[0], lastLbl = shown[shown.length - 1];
+  $('timeChart').innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Responses per day">
+      <line x1="0" y1="${H - 20}" x2="${W}" y2="${H - 20}" stroke="var(--baseline)" stroke-width="1"/>
+      ${bars}
+      <text x="4" y="${H - 5}">${firstLbl}</text>
+      <text x="${W - 4}" y="${H - 5}" text-anchor="end">${lastLbl}</text>
+      <text x="4" y="12">peak ${max}/day</text>
+    </svg>`;
+}
+
+function renderTable(data) {
+  if (!data.length) { $('recent').innerHTML = '<tr><td class="empty">No responses.</td></tr>'; return; }
+  const head = `<tr><th>When</th><th>Unit</th><th>Phase</th><th>Env</th><th>Answers</th><th>v</th></tr>`;
+  const body = data.slice(0, 25).map(r => {
+    const answers = Object.entries(r.answers || {})
+      .map(([k, v]) => `${labels[k] || k}: <b>${v}</b>`).join(' · ');
+    return `<tr>
+      <td class="num">${new Date(r.submitted_at).toLocaleString()}</td>
+      <td>${(r.unit_id || '—').toUpperCase()}</td>
+      <td>${r.phase_id || '—'}</td>
+      <td>${r.environment || 'production'}</td>
+      <td>${answers}</td>
+      <td class="num">${r.question_set_version ?? '—'}</td>
+    </tr>`;
+  }).join('');
+  $('recent').innerHTML = head + body;
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+
+async function enterApp() {
+  $('login').classList.add('hidden');
+  $('app').classList.remove('hidden');
+  await loadLabels();
+  await loadRows();
+}
+
+$('signin').addEventListener('click', signIn);
+$('pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') signIn(); });
+$('signout').addEventListener('click', signOut);
+$('refresh').addEventListener('click', loadRows);
+$('envFilter').addEventListener('change', render);
+$('unitFilter').addEventListener('change', render);
+
+if (token()) enterApp();
+</script>
+</body>
+</html>
