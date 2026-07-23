@@ -111,6 +111,11 @@
   th { text-align: left; color: var(--text-secondary); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--baseline); }
   td { padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
   td.num { font-variant-numeric: tabular-nums; }
+  ul.answers { list-style: none; margin: 0; padding: 0; min-width: 240px; }
+  ul.answers li { display: flex; align-items: baseline; gap: 8px; padding: 1px 0; }
+  ul.answers li::before { content: "\2022"; color: var(--muted); }
+  ul.answers .aq { flex: 1; color: var(--text-secondary); }
+  ul.answers .av { font-weight: 650; font-variant-numeric: tabular-nums; }
   .empty { color: var(--muted); text-align: center; padding: 28px 0; }
   .hidden { display: none; }
 </style>
@@ -318,8 +323,13 @@ function renderTable(data) {
   if (!data.length) { $('recent').innerHTML = '<tr><td class="empty">No responses.</td></tr>'; return; }
   const head = `<tr><th>When</th><th>Unit</th><th>Phase</th><th>Env</th><th>Answers</th><th>v</th></tr>`;
   const body = data.slice(0, 25).map(r => {
-    const answers = Object.entries(r.answers || {})
-      .map(([k, v]) => `${labels[k] || k}: <b>${v}</b>`).join(' · ');
+    // Order answers by the survey's question order so every row reads the
+    // same top-to-bottom; unknown ids (retired questions) sort to the end.
+    const rank = (id) => { const i = questionOrder.indexOf(id); return i === -1 ? 999 : i; };
+    const answers = '<ul class="answers">' + Object.entries(r.answers || {})
+      .sort((a, b) => rank(a[0]) - rank(b[0]))
+      .map(([k, v]) => `<li><span class="aq">${labels[k] || k}</span><span class="av">${v}</span></li>`)
+      .join('') + '</ul>';
     return `<tr>
       <td class="num">${new Date(r.submitted_at).toLocaleString()}</td>
       <td>${(r.unit_id || '—').toUpperCase()}</td>
