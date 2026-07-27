@@ -138,6 +138,12 @@
   <p class="sub">Anonymous Likert ratings from the caregiver app. Free-text feedback arrives by email, not here.</p>
 
   <div class="toolbar">
+    <select id="audienceFilter" aria-label="Audience">
+      <option value="family" selected>Patient family</option>
+      <option value="clinician">Clinician</option>
+      <option value="">All audiences</option>
+      <option value="unspecified">Unspecified</option>
+    </select>
     <select id="envFilter" aria-label="Environment">
       <option value="production" selected>Production</option>
       <option value="dev">Dev / test</option>
@@ -177,10 +183,16 @@ const ANON_KEY = 'sb_publishable_vv6cd3z8vRDlmNQPHkBtrA_NfAdmCzo';
    stays in sync with the published survey automatically. */
 const QUESTIONS_URL = 'https://raw.githubusercontent.com/MGH-LCS/patient-family-resource-content/testflight-mgh-picu-mirror/assets/content/feedback_questions.json';
 
+const AUDIENCES = ['family', 'clinician'];
 const $ = (id) => document.getElementById(id);
 let rows = [];            // all fetched responses
-let labels = {};          // question id -> English label
-let questionOrder = [];   // display order from the published survey
+// Per-audience question metadata, loaded from the published survey file.
+let labelsByAudience = { family: {}, clinician: {} };  // audience -> {qid: label}
+let orderByAudience  = { family: [], clinician: [] };   // audience -> [likert qid,...]
+// The label/order maps for the CURRENTLY selected audience — render() sets
+// these before calling the sub-renderers, which read them.
+let labels = {};
+let questionOrder = [];
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -214,9 +226,36 @@ async function loadLabels() {
   try {
     const res = await fetch(QUESTIONS_URL, { cache: 'no-store' });
     const file = await res.json();
-    questionOrder = file.questions.filter(q => q.type === 'likert').map(q => q.id);
-    for (const q of file.questions) labels[q.id] = q.label?.en || q.id;
+    // Resolve each audience's survey. Family falls back to the top-level
+    // mirror when the file predates the audiences block; clinician may be
+    // absent (not yet configured).
+    const surveys = {
+      family: file.audiences?.family ?? { questions: file.questions || [] },
+      clinician: file.audiences?.clinician ?? { questions: [] },
+    };
+    for (const a of AUDIENCES) {
+      const qs = surveys[a].questions || [];
+      orderByAudience[a] = qs.filter(q => q.type === 'likert').map(q => q.id);
+      labelsByAudience[a] = {};
+      for (const q of qs) labelsByAudience[a][q.id] = q.label?.en || q.id;
+    }
   } catch { /* fall back to raw ids */ }
+}
+
+// Labels/order for the selected audience. 'All' merges both; 'Unspecified'
+// (legacy rows, no audience) uses the family survey, since the pre-audience
+// app sent the single (family) survey's question ids.
+function metaFor(audience) {
+  if (audience === 'family' || audience === 'clinician') {
+    return { labels: labelsByAudience[audience], order: orderByAudience[audience] };
+  }
+  if (audience === 'unspecified') {
+    return { labels: labelsByAudience.family, order: orderByAudience.family };
+  }
+  return {
+    labels: { ...labelsByAudience.family, ...labelsByAudience.clinician },
+    order: [...orderByAudience.family, ...orderByAudience.clinician],
+  };
 }
 
 async function loadRows() {
@@ -235,15 +274,29 @@ async function loadRows() {
 function filtered() {
   const env = $('envFilter').value;
   const unit = $('unitFilter').value;
-  return rows.filter(r =>
-    (!env || (r.environment || 'production') === env) &&
-    (!unit || r.unit_id === unit));
+  const audience = $('audienceFilter').value;
+  return rows.filter(r => {
+    // Audience: 'family'/'clinician' = exact match; 'unspecified' = no
+    // audience tag (legacy rows); '' = all. NEVER default a null audience to
+    // a real one — that would fold legacy rows into a real survey's numbers.
+    const audienceOk =
+      audience === '' ? true :
+      audience === 'unspecified' ? !r.audience :
+      r.audience === audience;
+    return audienceOk &&
+      (!env || (r.environment || 'production') === env) &&
+      (!unit || r.unit_id === unit);
+  });
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
 
 function render() {
   const data = filtered();
+  // Point the shared label/order maps at the selected audience's survey.
+  const meta = metaFor($('audienceFilter').value);
+  labels = meta.labels;
+  questionOrder = meta.order;
 
   // Stat tiles
   const latest = data[0]?.submitted_at;
@@ -329,7 +382,7 @@ function renderTimeChart(data) {
 
 function renderTable(data) {
   if (!data.length) { $('recent').innerHTML = '<tr><td class="empty">No responses.</td></tr>'; return; }
-  const head = `<tr><th>When</th><th>Unit</th><th>Phase</th><th>Env</th><th>Answers</th><th>v</th></tr>`;
+  const head = `<tr><th>When</th><th>Audience</th><th>Unit</th><th>Phase</th><th>Env</th><th>Answers</th><th>v</th></tr>`;
   const body = data.slice(0, 25).map(r => {
     // Order answers by the survey's question order so every row reads the
     // same top-to-bottom; unknown ids (retired questions) sort to the end.
@@ -340,6 +393,7 @@ function renderTable(data) {
       .join('') + '</ul>';
     return `<tr>
       <td class="num">${new Date(r.submitted_at).toLocaleString()}</td>
+      <td>${r.audience || 'unspecified'}</td>
       <td>${(r.unit_id || '—').toUpperCase()}</td>
       <td>${r.phase_id || '—'}</td>
       <td>${r.environment || 'production'}</td>
@@ -363,6 +417,7 @@ $('signin').addEventListener('click', signIn);
 $('pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') signIn(); });
 $('signout').addEventListener('click', signOut);
 $('refresh').addEventListener('click', loadRows);
+$('audienceFilter').addEventListener('change', render);
 $('envFilter').addEventListener('change', render);
 $('unitFilter').addEventListener('change', render);
 
