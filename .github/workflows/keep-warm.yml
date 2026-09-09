@@ -1,24 +1,32 @@
 name: keep-supabase-warm
 
-# Supabase's free tier pauses a project after ~7 days with no activity, which
-# would make the next caregiver's feedback submission silently fail. This
-# workflow issues a trivial read against the REST API twice a week so the
-# project never goes idle long enough to pause.
+# Probes the feedback backend and fails loudly when it's unreachable.
 #
-# The query returns no rows (row-level security blocks anonymous reads) but
-# still executes against Postgres, which counts as activity. The anon key is
-# public-by-design — it can only INSERT — so it's safe to keep in the clear.
+# ⚠ READ THIS BEFORE TRUSTING THIS WORKFLOW TO PREVENT PAUSING.
+#
+# This started life as a keep-alive: Supabase's free tier pauses a project
+# after ~7 days idle, and the theory was that a twice-weekly REST read would
+# count as activity. Two full cycles say it does NOT:
+#
+#   cycle 1  project active 07-23 → pings green 07-27, 07-30 → paused by 08-03
+#   cycle 2  restored    08-06 → pings green 08-10, 08-13 → paused by 08-17
+#
+# Both times the project paused ~7 days after the last *human* dashboard
+# session, with green pings in between doing nothing. An anonymous read that
+# RLS blocks does not appear to reset Supabase's inactivity clock.
+#
+# So treat this workflow as a MONITOR, not a fix. It tells you the backend is
+# down; it does not keep it up. The real fix is a paid plan (pausing is a
+# free-tier behavior) or a heartbeat that genuinely writes — see the repo
+# README. Until one of those lands, expect a pause roughly weekly.
 #
 # NOTE: GitHub disables scheduled workflows after 60 days with no commits to
-# this repo. During pre-launch (no real feedback traffic yet) that's the exact
-# window this matters, so it runs now; once caregivers are submitting feedback,
-# that organic traffic keeps Supabase awake on its own. If the repo sits idle
-# for 60 days, re-enable this workflow from the Actions tab.
+# this repo. Re-enable from the Actions tab if that happens.
 
 on:
   schedule:
-    - cron: '17 12 * * 1,4'   # Mondays and Thursdays, 12:17 UTC (max ~3-4 day gap)
-  workflow_dispatch:           # allow a manual run from the Actions tab
+    - cron: '17 12 * * *'    # daily, 12:17 UTC — caps the detection gap at 1 day
+  workflow_dispatch:          # allow a manual run from the Actions tab
 
 jobs:
   ping:
@@ -26,11 +34,62 @@ jobs:
     steps:
       - name: Ping Supabase REST
         run: |
+          # The original version assigned `code=$(curl ...)` under bash -e, so a
+          # curl failure killed the step on the assignment itself and the log
+          # showed a bare "exit code 6" with no explanation. Every failure for
+          # six weeks was that opaque. Capture the exit code explicitly instead.
           SUPABASE_URL="https://qaqqpnjerjjyuygjqwpf.supabase.co"
-          ANON_KEY="sb_publishable_vv6cd3z8vRDlmNQPHkBtrA_NfAdmCzo"
-          code=$(curl -s -o /dev/null -w '%{http_code}' \
-            "$SUPABASE_URL/rest/v1/feedback_responses?select=id&limit=1" \
-            -H "apikey: $ANON_KEY")
-          echo "Supabase REST responded: HTTP $code"
-          # 200 = query ran (empty result is expected under RLS). Anything else fails the run.
-          test "$code" = "200"
+          ANON_KEY="sb_publishable_vv6cd3z8vRDlmNQPHkBtrA_NfAdmCzo"  # public by design: INSERT-only
+
+          # Retry before crying wolf. A pause lasts days, so a real one still
+          # fails all three attempts; a transient runner DNS blip does not.
+          # Without this, one flaky lookup would post a "PAUSED" alert and
+          # teach everyone to ignore the alerts that matter.
+          attempts=3
+          for i in $(seq 1 $attempts); do
+            set +e
+            body=$(curl -sS -m 20 -w '\n%{http_code}' \
+              "$SUPABASE_URL/rest/v1/feedback_responses?select=id&limit=1" \
+              -H "apikey: $ANON_KEY" 2>&1)
+            curl_exit=$?
+            set -e
+            code=$(printf '%s' "$body" | tail -n1)
+
+            echo "attempt $i/$attempts — curl exit: $curl_exit, HTTP: ${code:-none}"
+            [ "$curl_exit" -eq 0 ] && [ "$code" = "200" ] && break
+            [ "$i" -lt "$attempts" ] && sleep 20
+          done
+
+          echo "final curl exit: $curl_exit"
+          echo "final HTTP status: ${code:-none}"
+          echo "response: $(printf '%s' "$body" | head -c 500)"
+
+          # Both failure signatures are real and resolver-dependent. Actions
+          # runners have consistently seen NXDOMAIN (curl exit 6) for every
+          # pause so far; a probe from a laptop minutes later saw Cloudflare
+          # 521 instead, because the DNS record can outlive the origin. Handle
+          # both — do not assume one is "the" signature.
+          if [ "$curl_exit" -eq 6 ]; then
+            echo "::error::DNS lookup failed for $SUPABASE_URL (NXDOMAIN) on $attempts consecutive attempts. The Supabase project is PAUSED or DELETED. Restore it from the supabase.com dashboard — see the runbook in the README."
+            exit 1
+          fi
+          if [ "$curl_exit" -ne 0 ]; then
+            echo "::error::curl failed with exit $curl_exit on $attempts consecutive attempts — network or TLS problem reaching Supabase."
+            exit 1
+          fi
+          case "$code" in
+            200) ;;
+            521|522|523|530)
+              echo "::error::Cloudflare returned HTTP $code (origin unreachable) on $attempts consecutive attempts. The Supabase project is PAUSED. Restore it from the supabase.com dashboard — see the runbook in the README."
+              exit 1
+              ;;
+            401|403)
+              echo "::error::Supabase REST returned HTTP $code. The project is UP but rejecting the request — the anon key was rotated or the RLS policy changed."
+              exit 1
+              ;;
+            *)
+              echo "::error::Supabase REST returned HTTP $code (expected 200)."
+              exit 1
+              ;;
+          esac
+          echo "Backend reachable. (Reminder: this does not prevent pausing.)"
