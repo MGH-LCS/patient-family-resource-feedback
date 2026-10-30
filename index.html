@@ -116,7 +116,28 @@
   ul.answers li::before { content: "\2022"; color: var(--muted); }
   ul.answers .aq { flex: 1; color: var(--text-secondary); }
   ul.answers .av { font-weight: 650; font-variant-numeric: tabular-nums; }
+  ul.answers li.written { display: block; }
+  ul.answers li.written .av { font-weight: 400; font-style: italic; white-space: pre-wrap; display: block; }
   .empty { color: var(--muted); text-align: center; padding: 28px 0; }
+  /* ── Written answers ── */
+  .cardHead { display: flex; align-items: baseline; gap: 12px; }
+  .cardHead h2 { flex: 1; }
+  .cardHead button {
+    font: inherit; font-size: 13px; padding: 4px 12px;
+    background: none; border: 1px solid var(--baseline); border-radius: 8px;
+    color: var(--text-secondary); cursor: pointer;
+  }
+  .cardHead button:disabled { opacity: 0.5; cursor: default; }
+  .wq { margin-top: 18px; }
+  .wq h3 { font-size: 13px; font-weight: 650; padding-bottom: 6px; border-bottom: 1px solid var(--grid); }
+  .wq h3 .meta { color: var(--muted); font-weight: 400; }
+  .wa { padding: 10px 0; border-bottom: 1px solid var(--grid); }
+  .wa .t { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .wa .m { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .wq .more {
+    margin-top: 8px; font: inherit; font-size: 13px; padding: 0;
+    background: none; border: 0; color: var(--series-1); cursor: pointer;
+  }
   .hidden { display: none; }
 </style>
 </head>
@@ -135,7 +156,7 @@
 
 <div id="app" class="wrap hidden">
   <h1>App Feedback</h1>
-  <p class="sub">Anonymous Likert ratings from the caregiver app. Free-text feedback arrives by email, not here.</p>
+  <p class="sub">Anonymous ratings and written answers from the caregiver app.</p>
 
   <div class="toolbar">
     <select id="audienceFilter" aria-label="Audience">
@@ -160,6 +181,14 @@
   <div class="card">
     <h2>Average rating per question <span class="meta" id="qMeta"></span></h2>
     <div id="qBars"></div>
+  </div>
+
+  <div class="card">
+    <div class="cardHead">
+      <h2>Written answers</h2>
+      <button id="csv" type="button">Download CSV</button>
+    </div>
+    <div id="written"></div>
   </div>
 
   <div class="card">
@@ -189,10 +218,31 @@ let rows = [];            // all fetched responses
 // Per-audience question metadata, loaded from the published survey file.
 let labelsByAudience = { family: {}, clinician: {} };  // audience -> {qid: label}
 let orderByAudience  = { family: [], clinician: [] };   // audience -> [likert qid,...]
+let textOrderByAudience = { family: [], clinician: [] }; // audience -> [text qid,...]
 // The label/order maps for the CURRENTLY selected audience — render() sets
 // these before calling the sub-renderers, which read them.
 let labels = {};
 let questionOrder = [];
+let textOrder = [];
+// Written-answer sections the reader has expanded past the newest 20.
+const expanded = new Set();
+
+// Every value printed into the page goes through esc(). Rows are written by
+// the app through a public insert key, so anyone could put markup in a
+// written answer (or any other column); escaping keeps it as plain text.
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+// "going_home" → "Going home". The dashboard doesn't load units.json, so the
+// phase id is the only name it has.
+function phaseName(id) {
+  if (!id) return '';
+  const s = String(id).replace(/_/g, ' ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -236,6 +286,7 @@ async function loadLabels() {
     for (const a of AUDIENCES) {
       const qs = surveys[a].questions || [];
       orderByAudience[a] = qs.filter(q => q.type === 'likert').map(q => q.id);
+      textOrderByAudience[a] = qs.filter(q => q.type === 'text').map(q => q.id);
       labelsByAudience[a] = {};
       for (const q of qs) labelsByAudience[a][q.id] = q.label?.en || q.id;
     }
@@ -247,14 +298,23 @@ async function loadLabels() {
 // app sent the single (family) survey's question ids.
 function metaFor(audience) {
   if (audience === 'family' || audience === 'clinician') {
-    return { labels: labelsByAudience[audience], order: orderByAudience[audience] };
+    return {
+      labels: labelsByAudience[audience],
+      order: orderByAudience[audience],
+      textOrder: textOrderByAudience[audience],
+    };
   }
   if (audience === 'unspecified') {
-    return { labels: labelsByAudience.family, order: orderByAudience.family };
+    return {
+      labels: labelsByAudience.family,
+      order: orderByAudience.family,
+      textOrder: textOrderByAudience.family,
+    };
   }
   return {
     labels: { ...labelsByAudience.family, ...labelsByAudience.clinician },
     order: [...orderByAudience.family, ...orderByAudience.clinician],
+    textOrder: [...textOrderByAudience.family, ...textOrderByAudience.clinician],
   };
 }
 
@@ -267,7 +327,7 @@ async function loadRows() {
   rows = await res.json();
   const units = [...new Set(rows.map(r => r.unit_id).filter(Boolean))].sort();
   $('unitFilter').innerHTML = '<option value="">All units</option>' +
-    units.map(u => `<option value="${u}">${u.toUpperCase()}</option>`).join('');
+    units.map(u => `<option value="${esc(u)}">${esc(u.toUpperCase())}</option>`).join('');
   render();
 }
 
@@ -297,6 +357,7 @@ function render() {
   const meta = metaFor($('audienceFilter').value);
   labels = meta.labels;
   questionOrder = meta.order;
+  textOrder = meta.textOrder;
 
   // Stat tiles
   const latest = data[0]?.submitted_at;
@@ -313,9 +374,10 @@ function render() {
     <div class="tile"><div class="k">Unique submitters</div><div class="v">${uniqueDevices}</div><div class="n">${uniqueNote}</div></div>
     <div class="tile"><div class="k">Latest</div><div class="v" style="font-size:16px">${latest ? new Date(latest).toLocaleDateString() : '—'}</div>
       <div class="n">${latest ? new Date(latest).toLocaleTimeString() : ''}</div></div>
-    <div class="tile"><div class="k">Survey version</div><div class="v">${versions}</div></div>`;
+    <div class="tile"><div class="k">Survey version</div><div class="v">${esc(versions)}</div></div>`;
 
   renderQuestionBars(data);
+  renderWritten(data);
   renderTimeChart(data);
   renderTable(data);
 }
@@ -338,11 +400,92 @@ function renderQuestionBars(data) {
     const pct = ((avg - 1) / 4) * 100; // 1–5 scale → 0–100% of track
     return `
       <div class="qrow">
-        <div class="lbl">${labels[id] || id} <span class="meta">— avg ${avg.toFixed(2)} · n=${vals.length}</span></div>
+        <div class="lbl">${esc(labels[id] || id)} <span class="meta">— avg ${avg.toFixed(2)} · n=${vals.length}</span></div>
         <div class="barTrack"><div class="barFill" style="width:${pct}%"></div></div>
       </div>`;
   }).join('') + `
     <div class="axis5"><span>1 · Strongly disagree</span><span>3</span><span>5 · Strongly agree</span></div>`;
+}
+
+// A row's typed answers as [questionId, text] pairs. `written_answers` is a
+// separate column from the ratings (`answers`), absent when nothing was typed.
+function writtenEntries(r) {
+  const w = r.written_answers;
+  if (!w || typeof w !== 'object') return [];
+  return Object.entries(w).filter(([, v]) => typeof v === 'string' && v.trim());
+}
+
+const WRITTEN_SHOWN = 20;
+
+// One section per open-ended question, in survey order (retired ids last),
+// newest answer first — rows arrive sorted by submitted_at desc.
+function writtenByQuestion(data) {
+  const byQ = {};
+  for (const r of data) {
+    for (const [qid, text] of writtenEntries(r)) (byQ[qid] ??= []).push({ r, text });
+  }
+  const ids = [...new Set([...textOrder, ...Object.keys(byQ)])].filter(id => byQ[id]);
+  return ids.map(id => ({ id, items: byQ[id] }));
+}
+
+function renderWritten(data) {
+  const groups = writtenByQuestion(data);
+  $('csv').disabled = !groups.length;
+  if (!groups.length) {
+    $('written').innerHTML = '<p class="empty">No written answers match the current filters.</p>';
+    return;
+  }
+  const showAudience = $('audienceFilter').value === '';
+  $('written').innerHTML = groups.map(({ id, items }) => {
+    const shown = expanded.has(id) ? items : items.slice(0, WRITTEN_SHOWN);
+    const list = shown.map(({ r, text }) => {
+      const when = new Date(r.submitted_at);
+      const meta = [
+        `${when.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}, ${when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`,
+        r.unit_id ? r.unit_id.toUpperCase() : '',
+        phaseName(r.phase_id),
+        showAudience ? (r.audience || 'unspecified') : '',
+      ].filter(Boolean).map(esc).join(' · ');
+      return `<div class="wa"><div class="t">${esc(text)}</div><div class="m">${meta}</div></div>`;
+    }).join('');
+    const more = items.length > shown.length
+      ? `<button class="more" type="button" data-q="${esc(id)}">Show all ${items.length}</button>`
+      : '';
+    return `<div class="wq">
+      <h3>${esc(labels[id] || id)} <span class="meta">(${items.length})</span></h3>
+      ${list}${more}
+    </div>`;
+  }).join('');
+}
+
+// CSV of the filtered written answers, one line per answer. Built in the
+// browser; the BOM makes Excel read it as UTF-8 (Spanish accents).
+function downloadCsv() {
+  const header = ['submitted_at', 'audience', 'unit_id', 'site_id', 'phase_id',
+    'environment', 'question_id', 'question', 'answer'];
+  const lines = [header];
+  for (const { id, items } of writtenByQuestion(filtered())) {
+    for (const { r, text } of items) {
+      lines.push([r.submitted_at, r.audience || 'unspecified', r.unit_id, r.site_id,
+        r.phase_id, r.environment || 'production', id, labels[id] || id, text]);
+    }
+  }
+  const cell = (v) => {
+    let s = String(v ?? '');
+    // Anyone with the public insert key can write text, so a value a
+    // spreadsheet would run as a formula is kept as text.
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+  const csv = '﻿' + lines.map(l => l.map(cell).join(',')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `feedback-written-answers-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function renderTimeChart(data) {
@@ -387,18 +530,24 @@ function renderTable(data) {
     // Order answers by the survey's question order so every row reads the
     // same top-to-bottom; unknown ids (retired questions) sort to the end.
     const rank = (id) => { const i = questionOrder.indexOf(id); return i === -1 ? 999 : i; };
+    // Written answers follow the ratings, in italics, so one row still reads
+    // as one person's whole submission.
+    const textRank = (id) => { const i = textOrder.indexOf(id); return i === -1 ? 999 : i; };
     const answers = '<ul class="answers">' + Object.entries(r.answers || {})
       .sort((a, b) => rank(a[0]) - rank(b[0]))
-      .map(([k, v]) => `<li><span class="aq">${labels[k] || k}</span><span class="av">${v}</span></li>`)
+      .map(([k, v]) => `<li><span class="aq">${esc(labels[k] || k)}</span><span class="av">${esc(v)}</span></li>`)
+      .join('') + writtenEntries(r)
+      .sort((a, b) => textRank(a[0]) - textRank(b[0]))
+      .map(([k, v]) => `<li class="written"><span class="aq">${esc(labels[k] || k)}</span><span class="av">${esc(v)}</span></li>`)
       .join('') + '</ul>';
     return `<tr>
       <td class="num">${new Date(r.submitted_at).toLocaleString()}</td>
-      <td>${r.audience || 'unspecified'}</td>
-      <td>${(r.unit_id || '—').toUpperCase()}</td>
-      <td>${r.phase_id || '—'}</td>
-      <td>${r.environment || 'production'}</td>
+      <td>${esc(r.audience || 'unspecified')}</td>
+      <td>${esc((r.unit_id || '—').toUpperCase())}</td>
+      <td>${esc(r.phase_id || '—')}</td>
+      <td>${esc(r.environment || 'production')}</td>
       <td>${answers}</td>
-      <td class="num">${r.question_set_version ?? '—'}</td>
+      <td class="num">${esc(r.question_set_version ?? '—')}</td>
     </tr>`;
   }).join('');
   $('recent').innerHTML = head + body;
@@ -420,6 +569,13 @@ $('refresh').addEventListener('click', loadRows);
 $('audienceFilter').addEventListener('change', render);
 $('envFilter').addEventListener('change', render);
 $('unitFilter').addEventListener('change', render);
+$('csv').addEventListener('click', downloadCsv);
+$('written').addEventListener('click', (e) => {
+  const q = e.target.closest('button.more')?.dataset.q;
+  if (!q) return;
+  expanded.add(q);
+  render();
+});
 
 if (token()) enterApp();
 </script>
